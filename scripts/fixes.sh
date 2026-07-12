@@ -406,6 +406,40 @@ disable_virtual_desktop() {
 }
 
 # ============================================================
+# 12) Reparar pantalla de inicio de sesión en blanco (WAM/ADAL)
+# ============================================================
+fix_blank_login() {
+  [ -d "$PREFIX" ] || die "Prefix $PREFIX no existe"
+  LDP="LD_LIBRARY_PATH=/opt/winecx/lib:/opt/winecx/lib32:/opt/winecx/lib/wine"
+  WINE=/opt/winecx/bin/wine
+
+  log "Desactivando WAM (Web Account Manager) y forzando ADAL clásico..."
+
+  # Desactivar WAM para Azure AD
+  env $LDP WINEPREFIX="$PREFIX" $WINE reg add \
+    "HKCU\\Software\\Microsoft\\Office\\16.0\\Common\\Identity" /v DisableAADWAM /t REG_DWORD /d 1 /f 2>/dev/null || true
+
+  # Desactivar WAM override
+  env $LDP WINEPREFIX="$PREFIX" $WINE reg add \
+    "HKCU\\Software\\Microsoft\\Office\\16.0\\Common\\Identity" /v DisableADALatopWAMOverride /t REG_DWORD /d 1 /f 2>/dev/null || true
+
+  # Habilitar ADAL (Modern Auth clásico compatible con Wine)
+  env $LDP WINEPREFIX="$PREFIX" $WINE reg add \
+    "HKCU\\Software\\Microsoft\\Office\\16.0\\Common\\Identity" /v EnableADAL /t REG_DWORD /d 1 /f 2>/dev/null || true
+
+  # Opcional: Desactivar aceleración gráfica para la ventana de login
+  env $LDP WINEPREFIX="$PREFIX" $WINE reg add \
+    "HKCU\\Software\\Microsoft\\Office\\16.0\\Common\\Graphics" /v DisableHardwareAcceleration /t REG_DWORD /d 1 /f 2>/dev/null || true
+
+  # Limpiar credenciales de Office
+  log "Limpiando posibles archivos de licencia corruptos..."
+  rm -f "$PREFIX/drive_c/users/"*/AppData/Local/Microsoft/Office/16.0/Licensing/*.lic 2>/dev/null || true
+
+  env $LDP WINEPREFIX="$PREFIX" /opt/winecx/bin/wineserver -k 2>/dev/null || true
+  ok "Configuración de inicio de sesión reparada. Abre Word/Excel e intenta iniciar sesión nuevamente."
+}
+
+# ============================================================
 # 9) Reparar cache de fonts wine (cuelgues en dropdown de fonts)
 # ============================================================
 repair_font_cache() {
@@ -464,6 +498,81 @@ repair_font_cache() {
 }
 
 # ============================================================
+# 13) Instalar paquete de idioma adicional (zh-cn, en-us, etc.)
+# ============================================================
+install_language_pack() {
+  [ -d "$PREFIX" ] || die "Prefix $PREFIX no existe"
+  LDP="LD_LIBRARY_PATH=/opt/winecx/lib:/opt/winecx/lib32:/opt/winecx/lib/wine"
+  WINE=/opt/winecx/bin/wine
+
+  echo "Selecciona el idioma que deseas instalar:"
+  echo "  1) Chino Simplificado (zh-cn)"
+  echo "  2) Inglés (en-us)"
+  echo "  3) Portugués Brasileño (pt-br)"
+  echo "  4) Francés (fr-fr)"
+  echo "  5) Alemán (de-de)"
+  echo "  6) Otro (introducir código, ej: it-it)"
+  read -r -p "Opción [1-6]: " lang_opt </dev/tty
+
+  local LANG_CODE=""
+  case "$lang_opt" in
+    1) LANG_CODE="zh-cn" ;;
+    2) LANG_CODE="en-us" ;;
+    3) LANG_CODE="pt-br" ;;
+    4) LANG_CODE="fr-fr" ;;
+    5) LANG_CODE="de-de" ;;
+    6) read -r -p "Introduce el código del idioma (ej. ru-ru, ja-jp): " LANG_CODE </dev/tty ;;
+    *) warn "Opción inválida"; return ;;
+  esac
+
+  [ -n "$LANG_CODE" ] || { warn "Código de idioma no válido"; return; }
+
+  # 1) Verificar e instalar fuentes específicas para evitar caracteres rotos (tofu)
+  if [[ "$LANG_CODE" == "zh-cn" || "$LANG_CODE" == "zh-tw" || "$LANG_CODE" == "ja-jp" || "$LANG_CODE" == "ko-kr" ]]; then
+    log "Idioma CJK detectado. Verificando e instalando fuentes CJK en el sistema..."
+    case "$FAMILY" in
+      debian)
+        pkg_install fonts-noto-cjk fonts-noto-cjk-extra || true
+        ;;
+      arch|cachyos|manjaro)
+        pkg_install noto-fonts-cjk || true
+        ;;
+    esac
+  fi
+
+  # 2) Descargar instalador web de Microsoft (dynamic bootstrapper)
+  local EXE_NAME="OfficeSetup_${LANG_CODE}.exe"
+  local DL_URL="https://c2rsetup.officeapps.live.com/c2r/download.aspx?ProductreleaseID=LanguagePack&language=${LANG_CODE}&platform=x86"
+  local DL_PATH="/tmp/${EXE_NAME}"
+
+  log "Descargando instalador de idioma '${LANG_CODE}' desde Microsoft CDN..."
+  if ! curl -fL --retry 3 --progress-bar -o "$DL_PATH" "$DL_URL"; then
+    die "No se pudo descargar el paquete de idioma desde: $DL_URL"
+  fi
+
+  # 3) Ejecutar instalador Click-to-Run en el prefijo
+  log "Abriendo instalador de Microsoft. Sigue los pasos en pantalla..."
+  env $LDP WINEPREFIX="$PREFIX" $WINE "$DL_PATH" || true
+
+  # 4) Limpieza del instalador temporal
+  rm -f "$DL_PATH"
+
+  # 5) Aplicar fixes de registro para reparar el login y desactivar WAM
+  log "Re-aplicando configuraciones de seguridad e inicio de sesión..."
+  fix_blank_login
+
+  # 6) Reconstruir cachés de fuentes para evitar cuelgues
+  log "Refrescando bases de fuentes de Wine..."
+  env $LDP WINEPREFIX="$PREFIX" /opt/winecx/bin/wineserver -k 2>/dev/null || true
+  rm -rf "$PREFIX/drive_c/users/"*/AppData/Local/Microsoft/Windows/Fonts 2>/dev/null || true
+  rm -rf "$PREFIX/drive_c/users/"*/AppData/Roaming/wine/fontcache 2>/dev/null || true
+  sudo fc-cache -f >/dev/null 2>&1 || true
+  fc-cache -f >/dev/null 2>&1 || true
+
+  ok "Instalación del paquete de idioma '${LANG_CODE}' completada."
+}
+
+# ============================================================
 # 8) Re-instalación limpia
 # ============================================================
 reinstall() {
@@ -496,6 +605,8 @@ menu() {
   9) Reparar cache de fonts wine (cuelgues en dropdown de fonts)
  10) Activar Wine virtual desktop (fix ventana transparente KDE/KWin/Wayland)
  11) Desactivar Wine virtual desktop (volver a ventana nativa)
+ 12) Reparar pantalla de inicio de sesión en blanco (Desactivar WAM / Forzar ADAL)
+ 13) Instalar paquete de idioma adicional (zh-cn, en-us, pt-br, etc.)
   q) Salir
 
 EOF
@@ -512,6 +623,8 @@ EOF
     9) repair_font_cache ;;
     10) enable_virtual_desktop ;;
     11) disable_virtual_desktop ;;
+    12) fix_blank_login ;;
+    13) install_language_pack ;;
     q|Q) exit 0 ;;
     *) warn "Opción inválida" ;;
   esac
@@ -531,7 +644,9 @@ if [ $# -gt 0 ]; then
     9) repair_font_cache ;;
     10) enable_virtual_desktop ;;
     11) disable_virtual_desktop ;;
-    *) die "Opción inválida: $1 (válidas: 1-11)" ;;
+    12) fix_blank_login ;;
+    13) install_language_pack ;;
+    *) die "Opción inválida: $1 (válidas: 1-13)" ;;
   esac
   exit 0
 fi
@@ -540,3 +655,4 @@ fi
 while true; do
   menu
 done
+

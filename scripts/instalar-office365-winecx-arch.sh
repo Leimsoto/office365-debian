@@ -708,6 +708,18 @@ LD_LIBRARY_PATH="/opt/winecx/lib:/opt/winecx/lib32:/opt/winecx/lib/wine" \
   "HKLM\\Software\\Microsoft\\Office\\ClickToRun\\Configuration" \
   /v UpdateChannel /t REG_SZ /d "Deferred" /f 2>/dev/null || true
 
+# ---------------------------------------------------------
+# 13.5) Solucionar bug de login en blanco (Desactivar WAM y habilitar ADAL)
+# ---------------------------------------------------------
+echo ">> Optimizando configuración de inicio de sesión (modern auth)"
+LD_LIBRARY_PATH="/opt/winecx/lib:/opt/winecx/lib32:/opt/winecx/lib/wine" \
+  WINEPREFIX="$HOME/.Microsoft_Office_365" bash -c '
+  /opt/winecx/bin/wine reg add "HKCU\\Software\\Microsoft\\Office\\16.0\\Common\\Identity" /v DisableAADWAM /t REG_DWORD /d 1 /f 2>/dev/null || true
+  /opt/winecx/bin/wine reg add "HKCU\\Software\\Microsoft\\Office\\16.0\\Common\\Identity" /v DisableADALatopWAMOverride /t REG_DWORD /d 1 /f 2>/dev/null || true
+  /opt/winecx/bin/wine reg add "HKCU\\Software\\Microsoft\\Office\\16.0\\Common\\Identity" /v EnableADAL /t REG_DWORD /d 1 /f 2>/dev/null || true
+  /opt/winecx/bin/wine reg add "HKCU\\Software\\Microsoft\\Office\\16.0\\Common\\Graphics" /v DisableHardwareAcceleration /t REG_DWORD /d 1 /f 2>/dev/null || true
+'
+
 # Limpiar MRU
 PREFIX="$HOME/.Microsoft_Office_365"
 if [ -f "$PREFIX/user.reg" ]; then

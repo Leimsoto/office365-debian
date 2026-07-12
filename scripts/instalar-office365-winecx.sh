@@ -327,6 +327,17 @@ REGFILE="$WINEPREFIX/allfonts.reg"
 '
 
 # ---------------------------------------------------------
+# 18.5) Solucionar bug de login en blanco (Desactivar WAM y habilitar ADAL)
+# ---------------------------------------------------------
+echo ">> Optimizando configuración de inicio de sesión (modern auth)"
+WINEPREFIX="$HOME/.Microsoft_Office_365" bash -c '
+  /opt/winecx/bin/wine reg add "HKCU\\Software\\Microsoft\\Office\\16.0\\Common\\Identity" /v DisableAADWAM /t REG_DWORD /d 1 /f 2>/dev/null || true
+  /opt/winecx/bin/wine reg add "HKCU\\Software\\Microsoft\\Office\\16.0\\Common\\Identity" /v DisableADALatopWAMOverride /t REG_DWORD /d 1 /f 2>/dev/null || true
+  /opt/winecx/bin/wine reg add "HKCU\\Software\\Microsoft\\Office\\16.0\\Common\\Identity" /v EnableADAL /t REG_DWORD /d 1 /f 2>/dev/null || true
+  /opt/winecx/bin/wine reg add "HKCU\\Software\\Microsoft\\Office\\16.0\\Common\\Graphics" /v DisableHardwareAcceleration /t REG_DWORD /d 1 /f 2>/dev/null || true
+'
+
+# ---------------------------------------------------------
 # 19) Limpiar MRU
 # ---------------------------------------------------------
 PREFIX="$HOME/.Microsoft_Office_365"
